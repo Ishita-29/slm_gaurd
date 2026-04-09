@@ -1,0 +1,24 @@
+{
+  "num_labels": 12,
+  "labels": [
+    "benign",
+    "pretexting",
+    "authority_impersonation",
+    "urgency_emotion",
+    "reciprocity_conditioning",
+    "flattery_parasocial",
+    "incremental_escalation",
+    "authority_laundering",
+    "cognitive_load_embedding",
+    "false_consensus",
+    "normalization_repetition",
+    "identity_erosion"
+  ],
+  "max_length": 256,
+  "model_name": "answerdotai/ModernBERT-large",
+  "model_key": "modernbert",
+  "use_lora": true,
+  "use_int8": false,
+  "benign_weight": 11.0,
+  "is_decoder": false
+}

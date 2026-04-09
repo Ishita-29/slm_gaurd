@@ -1,0 +1,30 @@
+{
+  "n_classes": 7,
+  "cialdini_labels": {
+    "0": "benign",
+    "1": "authority",
+    "2": "reciprocity",
+    "3": "social_proof",
+    "4": "liking",
+    "5": "scarcity",
+    "6": "commitment"
+  },
+  "subtype_mapping": {
+    "benign": 0,
+    "authority_impersonation": 1,
+    "authority_laundering": 1,
+    "pretexting": 1,
+    "reciprocity_conditioning": 2,
+    "false_consensus": 3,
+    "normalization_repetition": 3,
+    "flattery_parasocial": 4,
+    "urgency_emotion": 5,
+    "incremental_escalation": 6,
+    "cognitive_load_embedding": 6,
+    "identity_erosion": 6
+  },
+  "macro_f1": 0.8863,
+  "accuracy": 0.871,
+  "hidden_size": 1024,
+  "encoder_ckpt": "/data/ishita_workspace/SLM-GAURD/slmguard/checkpoints/slmguard-modernbert-lora"
+}

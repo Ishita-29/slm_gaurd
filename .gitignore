@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+
+# Backup files
+*.backup
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Large model weight files (base model loads from HuggingFace, LoRA adapter included)
+*.bin
+slmguard/checkpoints/slmguard-modernbert-lora/checkpoint-*/
+slmguard/checkpoints/slmguard-modernbert-lora/warmup/
+slmguard/checkpoints/slmguard-deberta-lora/
+slmguard/checkpoints/slmguard-qwen25-lora/
+slmguard/checkpoints/slmguard-v1/
+slmguard/checkpoints/slmguard-v2/
+slmguard/checkpoints/slmguard-v3/
+slmguard/checkpoints/slmguard-v4/
+
+# Zip files
+*.zip
+
+# Installers
+Miniconda*.sh

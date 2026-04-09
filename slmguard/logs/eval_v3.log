@@ -1,0 +1,83 @@
+2026-04-06 15:07:06,428 INFO Loading model from ../checkpoints/slmguard-v3/checkpoint-1863
+2026-04-06 15:07:06,732 INFO HTTP Request: HEAD https://huggingface.co/microsoft/deberta-v3-large/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+2026-04-06 15:07:06,744 INFO HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/microsoft/deberta-v3-large/64a8c8eab3e352a784c658aef62be1662607476f/config.json "HTTP/1.1 200 OK"
+2026-04-06 15:07:07,022 INFO HTTP Request: HEAD https://huggingface.co/microsoft/deberta-v3-large/resolve/main/model.safetensors "HTTP/1.1 404 Not Found"
+2026-04-06 15:07:07,296 INFO HTTP Request: HEAD https://huggingface.co/microsoft/deberta-v3-large/resolve/main/model.safetensors.index.json "HTTP/1.1 404 Not Found"
+2026-04-06 15:07:07,669 INFO HTTP Request: HEAD https://huggingface.co/microsoft/deberta-v3-large/resolve/main/pytorch_model.bin "HTTP/1.1 302 Found"
+2026-04-06 15:07:07,996 INFO HTTP Request: HEAD https://huggingface.co/microsoft/deberta-v3-large/resolve/main/model.safetensors "HTTP/1.1 404 Not Found"
+2026-04-06 15:07:08,271 INFO HTTP Request: GET https://huggingface.co/api/models/microsoft/deberta-v3-large "HTTP/1.1 200 OK"
+Loading weights:   0%|          | 0/390 [00:00<?, ?it/s]Loading weights: 100%|██████████| 390/390 [00:00<00:00, 45961.75it/s]
+[1mDebertaV2Model LOAD REPORT[0m from: microsoft/deberta-v3-large
+Key                                     | Status     |  | 
+----------------------------------------+------------+--+-
+lm_predictions.lm_head.LayerNorm.bias   | UNEXPECTED |  | 
+mask_predictions.dense.bias             | UNEXPECTED |  | 
+mask_predictions.LayerNorm.bias         | UNEXPECTED |  | 
+lm_predictions.lm_head.LayerNorm.weight | UNEXPECTED |  | 
+lm_predictions.lm_head.dense.weight     | UNEXPECTED |  | 
+mask_predictions.LayerNorm.weight       | UNEXPECTED |  | 
+lm_predictions.lm_head.dense.bias       | UNEXPECTED |  | 
+lm_predictions.lm_head.bias             | UNEXPECTED |  | 
+mask_predictions.dense.weight           | UNEXPECTED |  | 
+mask_predictions.classifier.bias        | UNEXPECTED |  | 
+mask_predictions.classifier.weight      | UNEXPECTED |  | 
+
+[3mNotes:
+- UNEXPECTED[3m	:can be ignored when loading from different task/architecture; not ok if you expect identical arch.[0m
+2026-04-06 15:07:08,567 INFO HTTP Request: GET https://huggingface.co/api/models/microsoft/deberta-v3-large/commits/main "HTTP/1.1 200 OK"
+2026-04-06 15:07:08,870 INFO HTTP Request: GET https://huggingface.co/api/models/microsoft/deberta-v3-large/discussions?p=0 "HTTP/1.1 200 OK"
+2026-04-06 15:07:09,162 INFO HTTP Request: GET https://huggingface.co/api/models/microsoft/deberta-v3-large/commits/refs%2Fpr%2F13 "HTTP/1.1 200 OK"
+2026-04-06 15:07:09,437 INFO HTTP Request: HEAD https://huggingface.co/microsoft/deberta-v3-large/resolve/refs%2Fpr%2F13/model.safetensors.index.json "HTTP/1.1 404 Not Found"
+2026-04-06 15:07:09,708 INFO HTTP Request: HEAD https://huggingface.co/microsoft/deberta-v3-large/resolve/refs%2Fpr%2F13/model.safetensors "HTTP/1.1 302 Found"
+2026-04-06 15:07:11,052 INFO Loaded model.safetensors
+2026-04-06 15:07:13,553 INFO Loading test set from ../data/final/slmguard_dataset
+2026-04-06 15:07:13,573 INFO Running inference...
+2026-04-06 15:07:30,371 INFO Results saved → ../checkpoints/slmguard-v3/checkpoint-1863/eval_results.json
+
+======================================================================
+  SLM-Guard Evaluation Results
+======================================================================
+
+Binary SE Detection:
+  F1-score  : 0.0000
+  Accuracy  : 0.0833
+  AUC-ROC   : 0.5013
+  TP=0  FP=0  FN=3894  TN=354
+  FPR (benign) : 0.0000
+  FNR (attacks): 1.0000
+
+Multi-class Classification (12 tactics):
+  Macro F1   : 0.0128
+  Weighted F1: 0.0128
+
+Per-Class Metrics:
+                          precision    recall  f1-score   support
+
+                  benign     0.0833    1.0000    0.1538       354
+              pretexting     0.0000    0.0000    0.0000       354
+ authority_impersonation     0.0000    0.0000    0.0000       354
+         urgency_emotion     0.0000    0.0000    0.0000       354
+reciprocity_conditioning     0.0000    0.0000    0.0000       354
+     flattery_parasocial     0.0000    0.0000    0.0000       354
+  incremental_escalation     0.0000    0.0000    0.0000       354
+    authority_laundering     0.0000    0.0000    0.0000       354
+cognitive_load_embedding     0.0000    0.0000    0.0000       354
+         false_consensus     0.0000    0.0000    0.0000       354
+normalization_repetition     0.0000    0.0000    0.0000       354
+        identity_erosion     0.0000    0.0000    0.0000       354
+
+                accuracy                         0.0833      4248
+               macro avg     0.0069    0.0833    0.0128      4248
+            weighted avg     0.0069    0.0833    0.0128      4248
+
+
+Hard Negative Analysis:
+  FPR on hard negatives: 0.0000  (target < 0.05)
+  Sample count        : 96
+
+Latency per sample (cuda):
+  p50: 2.5ms
+  p95: 9.2ms  (target < 50ms)
+  p99: 9.4ms
+======================================================================
+✓ Evaluation complete

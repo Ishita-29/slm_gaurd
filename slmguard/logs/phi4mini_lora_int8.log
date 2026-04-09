@@ -1,0 +1,79 @@
+2026-04-06 18:49:10,235 INFO Device      : cuda
+2026-04-06 18:49:10,235 INFO Backbone    : microsoft/Phi-4-mini-instruct
+2026-04-06 18:49:10,235 INFO LoRA        : True  |  INT8 : True
+2026-04-06 18:49:10,235 INFO Epochs      : 8  (frozen warm-up: 0)
+2026-04-06 18:49:10,235 INFO Batch size  : 8  |  LR : 2e-05
+2026-04-06 18:49:10,235 INFO Loading dataset from ../data/final/slmguard_dataset
+2026-04-06 18:49:10,542 INFO HTTP Request: HEAD https://huggingface.co/microsoft/Phi-4-mini-instruct/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+2026-04-06 18:49:10,554 INFO HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/microsoft/Phi-4-mini-instruct/cfbefacb99257ffa30c83adab238a50856ac3083/config.json "HTTP/1.1 200 OK"
+2026-04-06 18:49:10,833 INFO HTTP Request: HEAD https://huggingface.co/microsoft/Phi-4-mini-instruct/resolve/main/configuration_phi3.py "HTTP/1.1 307 Temporary Redirect"
+2026-04-06 18:49:10,845 INFO HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/microsoft/Phi-4-mini-instruct/cfbefacb99257ffa30c83adab238a50856ac3083/configuration_phi3.py "HTTP/1.1 200 OK"
+2026-04-06 18:49:11,168 INFO HTTP Request: HEAD https://huggingface.co/microsoft/Phi-4-mini-instruct/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+2026-04-06 18:49:11,179 INFO HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/microsoft/Phi-4-mini-instruct/cfbefacb99257ffa30c83adab238a50856ac3083/config.json "HTTP/1.1 200 OK"
+This model config has set a `rope_parameters['original_max_position_embeddings']` field, to be used together with `max_position_embeddings` to determine a scaling factor. Please set the `factor` field of `rope_parameters`with this ratio instead -- we recommend the use of this field over `original_max_position_embeddings`, as it is compatible with most model architectures.
+2026-04-06 18:49:11,461 INFO HTTP Request: HEAD https://huggingface.co/microsoft/Phi-4-mini-instruct/resolve/main/tokenizer_config.json "HTTP/1.1 307 Temporary Redirect"
+2026-04-06 18:49:11,472 INFO HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/microsoft/Phi-4-mini-instruct/cfbefacb99257ffa30c83adab238a50856ac3083/tokenizer_config.json "HTTP/1.1 200 OK"
+2026-04-06 18:49:11,752 INFO HTTP Request: HEAD https://huggingface.co/microsoft/Phi-4-mini-instruct/resolve/main/tokenizer_config.json "HTTP/1.1 307 Temporary Redirect"
+2026-04-06 18:49:11,764 INFO HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/microsoft/Phi-4-mini-instruct/cfbefacb99257ffa30c83adab238a50856ac3083/tokenizer_config.json "HTTP/1.1 200 OK"
+2026-04-06 18:49:12,036 INFO HTTP Request: GET https://huggingface.co/api/models/microsoft/Phi-4-mini-instruct/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
+2026-04-06 18:49:12,321 INFO HTTP Request: GET https://huggingface.co/api/models/microsoft/Phi-4-mini-instruct/tree/main?recursive=true&expand=false "HTTP/1.1 200 OK"
+2026-04-06 18:49:13,802 INFO HTTP Request: GET https://huggingface.co/api/models/microsoft/Phi-4-mini-instruct "HTTP/1.1 200 OK"
+2026-04-06 18:49:13,840 INFO Tokenizing dataset...
+Map (num_proc=4):   0%|          | 0/19860 [00:00<?, ? examples/s]Map (num_proc=4):   5%|▌         | 1000/19860 [00:01<00:20, 925.74 examples/s]Map (num_proc=4):  10%|█         | 2000/19860 [00:01<00:09, 1872.02 examples/s]Map (num_proc=4):  25%|██▌       | 5000/19860 [00:01<00:03, 4942.78 examples/s]Map (num_proc=4):  45%|████▌     | 9000/19860 [00:01<00:01, 8592.31 examples/s]Map (num_proc=4):  65%|██████▌   | 13000/19860 [00:01<00:00, 11474.28 examples/s]Map (num_proc=4):  85%|████████▌ | 16930/19860 [00:02<00:00, 13495.62 examples/s]Map (num_proc=4): 100%|██████████| 19860/19860 [00:02<00:00, 13643.51 examples/s]Map (num_proc=4): 100%|██████████| 19860/19860 [00:02<00:00, 8376.89 examples/s] 
+Map (num_proc=4):   0%|          | 0/4248 [00:00<?, ? examples/s]Map (num_proc=4):  24%|██▎       | 1000/4248 [00:01<00:03, 904.39 examples/s]Map (num_proc=4):  49%|████▊     | 2062/4248 [00:01<00:01, 2002.00 examples/s]Map (num_proc=4):  74%|███████▎  | 3124/4248 [00:01<00:00, 3065.04 examples/s]Map (num_proc=4): 100%|██████████| 4248/4248 [00:01<00:00, 4281.64 examples/s]Map (num_proc=4): 100%|██████████| 4248/4248 [00:01<00:00, 2759.21 examples/s]
+Map (num_proc=4):   0%|          | 0/4248 [00:00<?, ? examples/s]Map (num_proc=4):  24%|██▎       | 1000/4248 [00:01<00:03, 821.56 examples/s]Map (num_proc=4):  74%|███████▎  | 3124/4248 [00:01<00:00, 2873.68 examples/s]Map (num_proc=4):  99%|█████████▊| 4186/4248 [00:01<00:00, 3464.51 examples/s]Map (num_proc=4): 100%|██████████| 4248/4248 [00:01<00:00, 2596.17 examples/s]
+Map (num_proc=4):   0%|          | 0/19860 [00:00<?, ? examples/s]Map (num_proc=4): 100%|██████████| 19860/19860 [00:00<00:00, 138334.61 examples/s]
+Map (num_proc=4):   0%|          | 0/4248 [00:00<?, ? examples/s]Map (num_proc=4): 100%|██████████| 4248/4248 [00:00<00:00, 33233.98 examples/s]
+Map (num_proc=4):   0%|          | 0/4248 [00:00<?, ? examples/s]Map (num_proc=4): 100%|██████████| 4248/4248 [00:00<00:00, 34128.25 examples/s]
+2026-04-06 18:49:20,914 INFO Initialising model...
+2026-04-06 18:49:20,915 INFO INT8 quantisation enabled via bitsandbytes
+2026-04-06 18:49:21,206 INFO HTTP Request: HEAD https://huggingface.co/microsoft/Phi-4-mini-instruct/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+2026-04-06 18:49:21,217 INFO HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/microsoft/Phi-4-mini-instruct/cfbefacb99257ffa30c83adab238a50856ac3083/config.json "HTTP/1.1 200 OK"
+2026-04-06 18:49:21,487 INFO HTTP Request: HEAD https://huggingface.co/microsoft/Phi-4-mini-instruct/resolve/main/configuration_phi3.py "HTTP/1.1 307 Temporary Redirect"
+2026-04-06 18:49:21,499 INFO HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/microsoft/Phi-4-mini-instruct/cfbefacb99257ffa30c83adab238a50856ac3083/configuration_phi3.py "HTTP/1.1 200 OK"
+`torch_dtype` is deprecated! Use `dtype` instead!
+2026-04-06 18:49:21,780 INFO HTTP Request: HEAD https://huggingface.co/microsoft/Phi-4-mini-instruct/resolve/main/modeling_phi3.py "HTTP/1.1 307 Temporary Redirect"
+2026-04-06 18:49:21,906 INFO HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/microsoft/Phi-4-mini-instruct/cfbefacb99257ffa30c83adab238a50856ac3083/modeling_phi3.py "HTTP/1.1 200 OK"
+Traceback (most recent call last):
+  File "/data/ishita_workspace/SLM-GAURD/slmguard/src/train.py", line 459, in <module>
+    train(
+    ~~~~~^
+        data_dir=args.data_dir,
+        ^^^^^^^^^^^^^^^^^^^^^^^
+    ...<9 lines>...
+        use_int8=args.int8,
+        ^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/data/ishita_workspace/SLM-GAURD/slmguard/src/train.py", line 324, in train
+    model = SLMGuardModel(
+        model_name=model_name,
+    ...<2 lines>...
+        use_int8=use_int8,
+    )
+  File "/data/ishita_workspace/SLM-GAURD/slmguard/src/train.py", line 103, in __init__
+    self.encoder = AutoModelForCausalLM.from_pretrained(
+                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^
+        model_name,
+        ^^^^^^^^^^^
+    ...<3 lines>...
+        device_map="auto" if use_int8 else None,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "/home/ishita/miniconda3/lib/python3.13/site-packages/transformers/models/auto/auto_factory.py", line 356, in from_pretrained
+    model_class = get_class_from_dynamic_module(
+        class_ref, pretrained_model_name_or_path, code_revision=code_revision, **hub_kwargs, **kwargs
+    )
+  File "/home/ishita/miniconda3/lib/python3.13/site-packages/transformers/dynamic_module_utils.py", line 583, in get_class_from_dynamic_module
+    return get_class_in_module(class_name, final_module, force_reload=force_download)
+  File "/home/ishita/miniconda3/lib/python3.13/site-packages/transformers/dynamic_module_utils.py", line 309, in get_class_in_module
+    module_spec.loader.exec_module(module)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^
+  File "<frozen importlib._bootstrap_external>", line 1023, in exec_module
+  File "<frozen importlib._bootstrap>", line 488, in _call_with_frames_removed
+  File "/home/ishita/.cache/huggingface/modules/transformers_modules/microsoft/Phi_hyphen_4_hyphen_mini_hyphen_instruct/cfbefacb99257ffa30c83adab238a50856ac3083/modeling_phi3.py", line 37, in <module>
+    from transformers.utils import (
+    ...<6 lines>...
+    )
+ImportError: cannot import name 'LossKwargs' from 'transformers.utils' (/home/ishita/miniconda3/lib/python3.13/site-packages/transformers/utils/__init__.py)

@@ -1,0 +1,45 @@
+{
+  "citation": "",
+  "description": "",
+  "features": {
+    "text": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "label": {
+      "names": [
+        "benign",
+        "pretexting",
+        "authority_impersonation",
+        "urgency_emotion",
+        "reciprocity_conditioning",
+        "flattery_parasocial",
+        "incremental_escalation",
+        "authority_laundering",
+        "cognitive_load_embedding",
+        "false_consensus",
+        "normalization_repetition",
+        "identity_erosion"
+      ],
+      "_type": "ClassLabel"
+    },
+    "label_id": {
+      "dtype": "int32",
+      "_type": "Value"
+    },
+    "is_se": {
+      "dtype": "int32",
+      "_type": "Value"
+    },
+    "source": {
+      "dtype": "string",
+      "_type": "Value"
+    },
+    "novel": {
+      "dtype": "bool",
+      "_type": "Value"
+    }
+  },
+  "homepage": "",
+  "license": ""
+}
