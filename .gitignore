@@ -41,6 +41,11 @@ slmguard/checkpoints/slmguard-v2/
 slmguard/checkpoints/slmguard-v3/
 slmguard/checkpoints/slmguard-v4/
 
+# Keep experiment result JSONs
+!slmguard/checkpoints/slmguard-v1/baseline_results.json
+!slmguard/checkpoints/slmguard-v1/guardrail_comparison.json
+!slmguard/checkpoints/slmguard-v1/eval_results.json
+
 # Zip files
 *.zip
 
