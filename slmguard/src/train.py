@@ -52,12 +52,17 @@ DECODER_FAMILIES = {"phi4mini", "qwen25"}
 
 class SLMGuardModel(nn.Module):
     """
-    Binary SE-detection head on top of a shared encoder or decoder backbone.
+    Multi-task SE-detection model on top of a shared encoder or decoder backbone.
+
+    Two jointly trained heads share the same encoder representation:
+      - binary_head     : sigmoid output → P(input is social engineering)
+      - multiclass_head : softmax over 12 classes (benign + 11 SE subtypes)
+
+    Joint loss = α·focal_binary_loss + (1-α)·cross_entropy_multiclass
+    where α=0.7 by default (binary task weighted more for deployment use).
 
     Encoder models (DeBERTa, ModernBERT): pool the [CLS] token.
-    Decoder models (Phi-4-mini):           pool the last non-padding token.
-
-    Dual head kept for compatibility but only binary head is trained/used.
+    Decoder models (Phi-4-mini, Qwen2.5): pool the last non-padding token.
     """
 
     def __init__(
@@ -122,7 +127,8 @@ class SLMGuardModel(nn.Module):
             nn.Linear(256, 1),
         )
 
-        # Multiclass head retained for inference interpretability (not trained)
+        # Multiclass head: jointly trained with binary head via multi-task loss.
+        # Provides per-subtype confidence scores (12 classes: benign + 11 SE tactics).
         self.multiclass_head = nn.Sequential(
             nn.LayerNorm(hidden_size),
             nn.Dropout(0.1),
@@ -194,37 +200,53 @@ def preprocess_function(examples, tokenizer, max_length=256):
 
 class SLMGuardTrainer(Trainer):
     """
-    Custom trainer with weighted focal loss for the binary head.
-      - Focal loss: gamma=2, focuses on hard examples
-      - Sample weights: benign upweighted by benign_weight (11.0 by default)
-      - NaN guard: skip batch rather than crash
+    Multi-task trainer: jointly optimises binary SE detection + 12-class tactic classification.
+
+    Loss = alpha * L_binary + (1 - alpha) * L_multiclass
+
+    L_binary     : focal BCE with class weighting (benign upweighted to handle 11:1 imbalance)
+    L_multiclass : standard cross-entropy over 12 SE subtypes + benign
+    alpha        : 0.7 — binary task weighted more because deployment goal is block/pass
+    gamma        : 2   — focal loss exponent; downweights easy examples
+    benign_weight: 11.0 — compensates for 1:11 benign:attack ratio in dataset
     """
 
-    def __init__(self, *args, benign_weight: float = BENIGN_WEIGHT, **kwargs):
+    def __init__(self, *args, benign_weight: float = BENIGN_WEIGHT,
+                 alpha: float = 0.7, **kwargs):
         super().__init__(*args, **kwargs)
         self.benign_weight = benign_weight
+        self.alpha = alpha           # weight of binary task in joint loss
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
         inputs  = dict(inputs)
-        _labels = inputs.pop("labels")               # not used for loss but kept in batch
-        is_se   = inputs.pop("is_se")                # binary 0/1  [B]
+        labels  = inputs.pop("labels")               # multiclass label 0–11  [B]
+        is_se   = inputs.pop("is_se")                # binary 0/1             [B]
         forward_inputs = {k: inputs[k] for k in ("input_ids", "attention_mask") if k in inputs}
 
-        outputs        = model(**forward_inputs)
-        binary_logits  = outputs["binary_logit"]     # [B]
+        outputs           = model(**forward_inputs)
+        binary_logits     = outputs["binary_logit"]      # [B]
+        multiclass_logits = outputs["multiclass_logits"] # [B, 12]
 
+        # ── Binary focal loss with class weighting ───────────────────────────
         bce_raw = nn.functional.binary_cross_entropy_with_logits(
             binary_logits, is_se.float(), reduction="none"
         )
-        p_t           = torch.exp(-bce_raw)
-        focal_weight  = (1 - p_t) ** 2              # gamma=2
-
+        p_t          = torch.exp(-bce_raw)
+        focal_weight = (1 - p_t) ** 2                   # gamma=2: focus on hard examples
         sample_weights = torch.where(
             is_se == 0,
             torch.full_like(is_se, self.benign_weight, dtype=torch.float),
             torch.ones_like(is_se, dtype=torch.float),
         )
-        loss = (focal_weight * bce_raw * sample_weights).mean()
+        binary_loss = (focal_weight * bce_raw * sample_weights).mean()
+
+        # ── Multiclass cross-entropy (12-way: benign + 11 SE subtypes) ───────
+        multiclass_loss = nn.functional.cross_entropy(
+            multiclass_logits, labels.long(), reduction="mean"
+        )
+
+        # ── Joint multi-task loss ─────────────────────────────────────────────
+        loss = self.alpha * binary_loss + (1.0 - self.alpha) * multiclass_loss
 
         if torch.isnan(loss):
             log.warning("NaN loss — skipping batch")
