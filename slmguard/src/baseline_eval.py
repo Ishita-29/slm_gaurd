@@ -1,18 +1,22 @@
 """
 Baseline Evaluation for SLM-Guard
 ===================================
-Runs three baselines on the same test set used to evaluate SLM-Guard,
+Runs baselines on the same test set used to evaluate SLM-Guard,
 then prints a comparison table.
 
 Baselines:
-  1. Keyword Filter   — regex patterns for known jailbreak/SE phrases
-  2. TF-IDF + LR      — classic ML bag-of-words classifier
-  3. LlamaGuard-3-8B  — Meta's state-of-the-art safety classifier (requires HF access)
+  1. Keyword Filter        — regex patterns for known jailbreak/SE phrases
+  2. TF-IDF + LR           — classic ML bag-of-words classifier
+  3. OpenAI Moderation API — production content moderation (omni-moderation-latest)
+  4. LlamaGuard-3-8B       — Meta's SOTA safety classifier (requires HF access)
 
 Usage:
-  python baseline_eval.py                        # all baselines (no LlamaGuard)
+  python baseline_eval.py                        # keyword + TF-IDF only
+  python baseline_eval.py --openai               # include OpenAI moderation API
   python baseline_eval.py --llamaguard           # include LlamaGuard (downloads 16GB model)
-  python baseline_eval.py --llamaguard --save    # save results to baselines_results.json
+  python baseline_eval.py --openai --llamaguard --save   # all baselines + save results
+
+Set OPENAI_API_KEY environment variable before running with --openai.
 """
 
 import argparse
@@ -139,6 +143,91 @@ def evaluate_baseline(name, preds, true_binary, true_labels, texts=None,
     }
 
 
+def run_openai_moderation(texts, true_binary, true_labels, hard_neg_mask):
+    """
+    Run OpenAI's omni-moderation-latest on the test set.
+
+    OpenAI moderation detects: hate, harassment, self-harm, sexual, violence,
+    and related subcategories. It does NOT include psychological SE mechanisms
+    (authority laundering, false consensus, cognitive load embedding etc.) —
+    exactly the gap this thesis addresses.
+
+    Requires: OPENAI_API_KEY environment variable.
+    Cost: ~$0.002 per 1000 inputs (essentially free for a test set).
+    """
+    import os
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        log.error("OPENAI_API_KEY not set — skipping OpenAI moderation baseline")
+        return None
+
+    try:
+        from openai import OpenAI
+    except ImportError:
+        log.error("openai package not installed. Run: pip install openai")
+        return None
+
+    client = OpenAI(api_key=api_key)
+    log.info(f"Running OpenAI omni-moderation-latest on {len(texts)} samples...")
+    log.info("  (batching 32 at a time to stay within rate limits)")
+
+    preds     = []
+    probs     = []
+    latencies = []
+    BATCH     = 32
+
+    for i in range(0, len(texts), BATCH):
+        batch = texts[i:i + BATCH]
+        t0 = time.perf_counter()
+        try:
+            response = client.moderations.create(
+                model="omni-moderation-latest",
+                input=batch,
+            )
+            elapsed = (time.perf_counter() - t0) * 1000
+            latencies.extend([elapsed / len(batch)] * len(batch))
+
+            for result in response.results:
+                # flagged=True means OpenAI considers it harmful
+                preds.append(1 if result.flagged else 0)
+                # Use max category score as confidence proxy
+                scores = result.category_scores.model_dump()
+                probs.append(max(scores.values()))
+
+        except Exception as e:
+            log.error(f"OpenAI API error at batch {i}: {e}")
+            # Fill with zeros for failed batch
+            preds.extend([0] * len(batch))
+            probs.extend([0.0] * len(batch))
+            latencies.extend([0.0] * len(batch))
+
+        if (i + BATCH) % 320 == 0:
+            log.info(f"  {min(i+BATCH, len(texts))}/{len(texts)} done")
+
+    preds = np.array(preds)
+    probs = np.array(probs)
+    lat   = np.array(latencies)
+
+    results = evaluate_baseline(
+        "OpenAI omni-moderation-latest",
+        preds, true_binary, true_labels,
+        probs=probs,
+        hard_neg_mask=hard_neg_mask,
+    )
+    results["latency_ms"] = {
+        "p50": float(np.percentile(lat, 50)),
+        "p95": float(np.percentile(lat, 95)),
+    }
+    print(f"  Latency p50: {results['latency_ms']['p50']:.1f}ms  "
+          f"p95: {results['latency_ms']['p95']:.1f}ms")
+
+    # Show which OpenAI categories fired most — useful for thesis analysis
+    log.info("  Note: OpenAI categories (hate/harassment/violence/sexual) do not include")
+    log.info("  psychological SE mechanisms — this is the core gap SLM-Guard addresses.")
+
+    return results
+
+
 def run_llamaguard(texts, true_binary, true_labels, hard_neg_mask):
     """
     Run Meta's LlamaGuard-3-8B on the test set.
@@ -220,8 +309,8 @@ def run_llamaguard(texts, true_binary, true_labels, hard_neg_mask):
     return results
 
 
-def main(include_llamaguard: bool = False, save: bool = False,
-         checkpoint: str = "../checkpoints/slmguard-v2"):
+def main(include_llamaguard: bool = False, include_openai: bool = False,
+         save: bool = False, checkpoint: str = "../checkpoints/slmguard-v2"):
 
     # ── Load test set ─────────────────────────────────────────────────────────
     log.info(f"Loading test set from {DATA_DIR}")
@@ -303,7 +392,13 @@ def main(include_llamaguard: bool = False, save: bool = False,
     results["tfidf_lr"]["latency_ms_per_sample"] = round(lr_time, 3)
     print(f"  Latency: {lr_time:.3f}ms/sample")
 
-    # ── Baseline 3: LlamaGuard (optional) ────────────────────────────────────
+    # ── Baseline 3: OpenAI Moderation API (optional) ─────────────────────────
+    if include_openai:
+        oai_results = run_openai_moderation(texts, true_binary, true_labels, hard_neg_mask)
+        if oai_results:
+            results["openai_moderation"] = oai_results
+
+    # ── Baseline 4: LlamaGuard (optional) ────────────────────────────────────
     if include_llamaguard:
         lg_results = run_llamaguard(texts, true_binary, true_labels, hard_neg_mask)
         if lg_results:
@@ -352,16 +447,19 @@ def main(include_llamaguard: bool = False, save: bool = False,
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Baseline evaluation for SLM-Guard")
+    parser.add_argument("--openai", action="store_true",
+                        help="Include OpenAI omni-moderation-latest baseline (requires OPENAI_API_KEY)")
     parser.add_argument("--llamaguard", action="store_true",
                         help="Include LlamaGuard-3-8B baseline (downloads ~16GB model)")
     parser.add_argument("--save", action="store_true",
                         help="Save results to checkpoint dir as baseline_results.json")
-    parser.add_argument("--checkpoint", default="../checkpoints/slmguard-v2",
+    parser.add_argument("--checkpoint", default="../checkpoints/slmguard-v1",
                         help="Path to SLM-Guard checkpoint (for loading eval_results.json)")
     args = parser.parse_args()
 
     main(
         include_llamaguard=args.llamaguard,
+        include_openai=args.openai,
         save=args.save,
         checkpoint=args.checkpoint,
     )
