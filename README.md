@@ -1,4 +1,4 @@
-a# SLM-Guard
+# SLM-Guard
 
 Psychology-grounded middleware classifier for detecting social engineering attacks on LLMs.
 
