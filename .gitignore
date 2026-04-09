@@ -10,6 +10,11 @@ build/
 # Environment
 .env
 
+# Logs (may contain HF xet-read-tokens from HTTP request logging)
+logs/
+*.log
+slmguard/logs/
+
 # Backup files
 *.backup
 
