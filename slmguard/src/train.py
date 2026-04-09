@@ -224,8 +224,12 @@ class SLMGuardTrainer(Trainer):
         forward_inputs = {k: inputs[k] for k in ("input_ids", "attention_mask") if k in inputs}
 
         outputs           = model(**forward_inputs)
-        binary_logits     = outputs["binary_logit"]      # [B]
-        multiclass_logits = outputs["multiclass_logits"] # [B, 12]
+        binary_logits     = outputs["binary_logit"].float()      # [B]  — force FP32
+        multiclass_logits = outputs["multiclass_logits"].float() # [B, 12] — force FP32
+
+        # Clamp logits to prevent fp16/bf16 overflow cascading into loss NaN
+        binary_logits     = torch.clamp(binary_logits, -20, 20)
+        multiclass_logits = torch.clamp(multiclass_logits, -50, 50)
 
         # ── Binary focal loss with class weighting ───────────────────────────
         bce_raw = nn.functional.binary_cross_entropy_with_logits(
@@ -366,8 +370,8 @@ def train(
             eval_strategy="epoch",
             logging_steps=50,
             fp16=False,
-            bf16=use_bf16,
-            max_grad_norm=1.0,
+            bf16=False,
+            max_grad_norm=0.5,
             remove_unused_columns=False,
             dataloader_num_workers=4,
             seed=42,
@@ -407,10 +411,10 @@ def train(
         save_total_limit=2,
         seed=42,
         fp16=False,
-        bf16=use_bf16 and not use_int8,    # bf16 incompatible with int8
+        bf16=False,                         # force fp32 — bf16 causes NaN in DeBERTa encoder with multi-task loss
         dataloader_num_workers=4,
         remove_unused_columns=False,
-        max_grad_norm=0.3,
+        max_grad_norm=0.1,                  # tighter clipping for stability with multi-task gradients
         optim="adamw_torch",
     )
 

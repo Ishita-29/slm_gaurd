@@ -57,11 +57,30 @@ def evaluate(checkpoint_dir: str = "../checkpoints/slmguard-v1", threshold: floa
     """Main evaluation pipeline"""
     
     log.info(f"Loading model from {checkpoint_dir}")
-    
-    # Load tokenizer & model
-    tokenizer = DebertaV2Tokenizer.from_pretrained(checkpoint_dir)
-    model = SLMGuardModel()
-    
+
+    # Read saved config to get correct backbone / LoRA settings
+    import json
+    cfg_path = Path(checkpoint_dir) / "slmguard_config.json"
+    if cfg_path.exists():
+        with open(cfg_path) as f:
+            saved_cfg = json.load(f)
+        model_key  = saved_cfg.get("model_key",  "deberta")
+        model_name = saved_cfg.get("model_name", "microsoft/deberta-v3-large")
+        use_lora   = saved_cfg.get("use_lora",   False)
+        log.info(f"Config: model_key={model_key}, use_lora={use_lora}")
+    else:
+        model_key, model_name, use_lora = "deberta", "microsoft/deberta-v3-large", False
+
+    # Load tokenizer
+    from transformers import AutoTokenizer
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(checkpoint_dir)
+    except Exception:
+        tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+
+    # Build model with correct architecture
+    model = SLMGuardModel(model_name=model_name, model_key=model_key, use_lora=use_lora)
+
     # Load weights
     weight_path = Path(checkpoint_dir) / "pytorch_model.bin"
     if weight_path.exists():
@@ -75,7 +94,7 @@ def evaluate(checkpoint_dir: str = "../checkpoints/slmguard-v1", threshold: floa
         except Exception as e:
             log.error(f"Failed to load model weights: {e}")
             return 1
-    
+
     model = model.float().to(DEVICE).eval()  # force float32 throughout
     
     # Load test set
