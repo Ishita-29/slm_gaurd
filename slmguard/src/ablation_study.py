@@ -244,8 +244,9 @@ def run_ablation(ablation_id: str, cfg: AblationConfig, dataset,
     tokenized.set_format("torch", columns=["input_ids", "attention_mask", "labels", "is_se"])
 
     model = SLMGuardModel(
-        model_name="microsoft/deberta-v3-large",
-        model_key="deberta",
+        model_name="answerdotai/ModernBERT-large",
+        model_key="modernbert",
+        use_lora=True,
     ).to(DEVICE)
 
     # Phase 1: frozen warm-up (if configured)
@@ -329,7 +330,8 @@ def run_ablation(ablation_id: str, cfg: AblationConfig, dataset,
 def main(ablations_to_run: List[str], quick: bool = False):
     log.info(f"Loading dataset from {DATA_DIR}")
     dataset   = load_from_disk(DATA_DIR)
-    tokenizer = DebertaV2Tokenizer.from_pretrained("microsoft/deberta-v3-large")
+    from transformers import AutoTokenizer
+    tokenizer = AutoTokenizer.from_pretrained("answerdotai/ModernBERT-large")
 
     all_results = {}
 

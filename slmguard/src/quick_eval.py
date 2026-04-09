@@ -3,21 +3,22 @@ from safetensors.torch import load_file
 sys.path.insert(0, '/data/ishita_workspace/SLM-GAURD/slmguard/src')
 from config import ALL_LABELS, ID2LABEL
 from datasets import load_from_disk
-from transformers import DebertaV2Tokenizer
+from transformers import AutoTokenizer
 from train import SLMGuardModel
 from collections import Counter
 
-CKPT = '/data/ishita_workspace/SLM-GAURD/slmguard/checkpoints/slmguard-v3'
+CKPT = '/data/ishita_workspace/SLM-GAURD/slmguard/checkpoints/slmguard-modernbert-lora'
 DATA = '/data/ishita_workspace/SLM-GAURD/slmguard/data/final/slmguard_dataset'
 
 print("Loading model...")
-model = SLMGuardModel('microsoft/deberta-v3-large').cuda()
-state = load_file(f'{CKPT}/model.safetensors')
+model = SLMGuardModel('answerdotai/ModernBERT-large', model_key='modernbert', use_lora=True).cuda()
+state = torch.load(f'{CKPT}/pytorch_model.bin', map_location='cuda')
 model.load_state_dict(state, strict=False)
 model.eval()
 
 print("Loading tokenizer and data...")
-tokenizer = DebertaV2Tokenizer.from_pretrained('microsoft/deberta-v3-large')
+from transformers import AutoTokenizer
+tokenizer = AutoTokenizer.from_pretrained(CKPT)
 ds = load_from_disk(DATA)['test'].select(range(240))
 
 preds_mc, true_mc, preds_bin, true_bin = [], [], [], []

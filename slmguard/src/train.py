@@ -411,7 +411,7 @@ def train(
         save_total_limit=2,
         seed=42,
         fp16=False,
-        bf16=False,                         # force fp32 — bf16 causes NaN in DeBERTa encoder with multi-task loss
+        bf16=use_bf16 and "deberta" not in model_name.lower() and not use_int8,  # bf16 causes NaN in DeBERTa with multi-task loss
         dataloader_num_workers=4,
         remove_unused_columns=False,
         max_grad_norm=0.1,                  # tighter clipping for stability with multi-task gradients
