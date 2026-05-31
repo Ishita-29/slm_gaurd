@@ -40,6 +40,10 @@ slmguard/checkpoints/slmguard-v1/
 slmguard/checkpoints/slmguard-v2/
 slmguard/checkpoints/slmguard-v3/
 slmguard/checkpoints/slmguard-v4/
+slmguard/checkpoints/slmguard-modernbert-v2/
+
+# Separate project — not part of slm_gaurd
+audio_se_project/
 
 # Keep experiment result JSONs
 !slmguard/checkpoints/slmguard-v1/baseline_results.json

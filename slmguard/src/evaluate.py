@@ -196,17 +196,40 @@ def evaluate(checkpoint_dir: str = "../checkpoints/slmguard-v1", threshold: floa
     print(f"  p99: {np.percentile(lat, 99):.1f}ms")
     
     # Save results
+    fpr_val = float(fp / (fp + tn + 1e-9))
+    fnr_val = float(fn / (fn + tp + 1e-9))
+    hn_fpr_val = float(hn_fpr) if 'hn_fpr' in dir() and hn_fpr is not None else None
+
+    per_class = {}
+    report_dict = classification_report(
+        true_labels, pred_labels,
+        target_names=ALL_LABELS,
+        zero_division=0, output_dict=True,
+    )
+    for label in ALL_LABELS:
+        if label in report_dict:
+            per_class[label] = {
+                "precision": float(report_dict[label]["precision"]),
+                "recall":    float(report_dict[label]["recall"]),
+                "f1-score":  float(report_dict[label]["f1-score"]),
+                "support":   int(report_dict[label]["support"]),
+            }
+
     results = {
         "binary": {
-            "f1": float(binary_f1),
+            "f1":       float(binary_f1),
             "accuracy": float(binary_acc),
-            "auc": float(binary_auc),
+            "auc":      float(binary_auc),
+            "fpr":      fpr_val,
+            "fnr":      fnr_val,
             "tp": int(tp), "fp": int(fp), "fn": int(fn), "tn": int(tn),
         },
         "multiclass": {
-            "macro_f1": float(macro_f1),
+            "macro_f1":    float(macro_f1),
             "weighted_f1": float(weighted_f1),
         },
+        "per_class": per_class,
+        "hn_fpr": hn_fpr_val,
         "latency_ms": {
             "p50": float(np.percentile(lat, 50)),
             "p95": float(np.percentile(lat, 95)),

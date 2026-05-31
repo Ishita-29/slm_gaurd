@@ -1,4 +1,4 @@
-
+"""Garak probe extraction — extracts red-teaming probes from garak framework"""
 
 import json
 import logging
