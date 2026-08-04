@@ -304,6 +304,13 @@ def cap_classes(samples: list[dict], max_multiplier: float = 3.0, equalize: bool
     return result
 
 
+def _text_prefix(text: str, n: int = 50) -> str:
+    """Normalized text prefix used as a cheap near-duplicate signal when no
+    goal metadata is available to group paraphrase families by."""
+    t = re.sub(r"[^a-z0-9]+", " ", text.lower())
+    return t.strip()[:n]
+
+
 def stratified_split(
     samples: list[dict],
     train: float = 0.70,
@@ -311,23 +318,54 @@ def stratified_split(
     test: float  = 0.15,
     seed: int    = 42,
 ) -> tuple[list, list, list]:
+    """Splits by (source, goal) family within each (label, harm_label) bucket, so
+    paraphrase/template variants of the same underlying prompt never end up split
+    across train/test, and each split keeps both the se_label mix AND the harm_label
+    balance close to the overall dataset's — stratifying by se_label alone lets the
+    harm ratio drift across splits as a side effect of family-grouping."""
     import random
     rng = random.Random(seed)
 
     by_label = defaultdict(list)
     for s in samples:
-        by_label[s["label"]].append(s)
+        by_label[(s["label"], s.get("harm_label"))].append(s)
 
     train_set, val_set, test_set = [], [], []
     for label, bucket in by_label.items():
-        rng.shuffle(bucket)
-        n       = len(bucket)
-        n_test  = max(1, int(n * test))
-        n_val   = max(1, int(n * val))
-        n_train = n - n_val - n_test
-        train_set.extend(bucket[:n_train])
-        val_set.extend(bucket[n_train:n_train + n_val])
-        test_set.extend(bucket[n_train + n_val:])
+        families = defaultdict(list)
+        for s in bucket:
+            # Group by goal when one exists. Otherwise fall back to a normalized
+            # text-prefix signal (not a plain source-only grouping) — rows sharing
+            # a source but with genuinely different content (e.g. real external
+            # data like WildJailbreak) must not be forced into one giant
+            # indivisible family just because they share a source string, but
+            # rows that share both source AND opening phrasing (template variants
+            # whose goal metadata was lost) still need to stay grouped.
+            goal = s.get("goal", "")
+            source = s.get("source", "unknown")
+            key = (source, goal) if goal else (source, _text_prefix(s.get("text", "")))
+            families[key].append(s)
+
+        family_list = list(families.values())
+        rng.shuffle(family_list)
+
+        # Assign each family to whichever split is currently furthest below its
+        # target proportion — spreads family-size lumpiness across all three
+        # splits instead of concentrating overshoot in whichever fills first.
+        targets = {"train": train, "val": val, "test": test}
+        counts  = {"train": 0, "val": 0, "test": 0}
+        bucket_assigned = {"train": [], "val": [], "test": []}
+
+        for family in family_list:
+            total = sum(counts.values())
+            deficits = {k: targets[k] - counts[k] / max(1, total) for k in targets}
+            choice = max(deficits, key=deficits.get)
+            bucket_assigned[choice].extend(family)
+            counts[choice] += len(family)
+
+        train_set.extend(bucket_assigned["train"])
+        val_set.extend(bucket_assigned["val"])
+        test_set.extend(bucket_assigned["test"])
 
     rng.shuffle(train_set)
     rng.shuffle(val_set)

@@ -8,9 +8,14 @@ DEVICE = 'cuda'
 CKPT = '/data/ishita_workspace/SLM-GAURD/slmguard/checkpoints/slmguard-modernbert-lora'
 
 cfg = json.load(open(f'{CKPT}/slmguard_config.json'))
+MAX_LENGTH = cfg.get('max_length', 256)  # read from checkpoint, not hardcoded — must match training
 model = SLMGuardModel(model_name=cfg['model_name'], model_key=cfg['model_key'], use_lora=cfg['use_lora'])
 state = torch.load(f'{CKPT}/pytorch_model.bin', map_location='cpu')
-model.load_state_dict(state, strict=False)
+load_result = model.load_state_dict(state, strict=False)
+if load_result.missing_keys:
+    print(f"WARNING: missing_keys when loading checkpoint: {load_result.missing_keys}")
+if load_result.unexpected_keys:
+    print(f"WARNING: unexpected_keys when loading checkpoint: {load_result.unexpected_keys}")
 model.eval().to(DEVICE)
 tok = AutoTokenizer.from_pretrained(cfg['model_name'], trust_remote_code=True)
 
@@ -18,7 +23,7 @@ def evaluate_file(path, name, threshold=0.4):
     examples = [json.loads(l) for l in open(path)]
     scores, labels = [], []
     for ex in examples:
-        enc = tok(ex['text'], return_tensors='pt', max_length=256, truncation=True, padding=True)
+        enc = tok(ex['text'], return_tensors='pt', max_length=MAX_LENGTH, truncation=True, padding=True)
         enc = {k: v.to(DEVICE) for k, v in enc.items()}
         with torch.no_grad():
             out = model(**enc)

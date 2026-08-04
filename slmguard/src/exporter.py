@@ -19,8 +19,11 @@ FEATURES = Features({
     "label": ClassLabel(names=ALL_LABELS),
     "label_id": Value("int32"),
     "is_se": Value("int32"),
+    "harm_label": Value("int32"),
+    "is_hard_negative": Value("bool"),
     "source": Value("string"),
-    "novel": Value("bool"),
+    "model": Value("string"),
+    "goal": Value("string"),
 })
 
 
@@ -43,13 +46,20 @@ def normalize(s: dict) -> dict:
     label = s.get("label", "benign")
     if label not in LABEL2ID:
         label = "benign"
+    is_se = 0 if label == "benign" else 1
+    harm_label = s.get("harm_label")
+    if harm_label not in (0, 1):
+        harm_label = -1  # unresolved — should not occur once harm_label_judge.py has run
     return {
         "text": str(s.get("text", "")).strip(),
         "label": label,
         "label_id": LABEL2ID[label],
-        "is_se": 0 if label == "benign" else 1,
+        "is_se": is_se,
+        "harm_label": harm_label,
+        "is_hard_negative": is_se == 1 and harm_label == 0,
         "source": str(s.get("source", "unknown")),
-        "novel": bool(s.get("novel", False)),
+        "model": str(s.get("model", "")),
+        "goal": str(s.get("goal", "")),
     }
 
 
@@ -107,6 +117,11 @@ def print_stats(dataset: DatasetDict):
         print(f"\n{split_name.upper()} ({len(split_data):,} samples)")
         print(f"  SE: {se:,} ({se/len(split_data)*100:.1f}%)  "
               f"Benign: {bn:,} ({bn/len(split_data)*100:.1f}%)")
+
+        harm_counts = Counter(split_data["harm_label"])
+        hard_neg = sum(split_data["is_hard_negative"])
+        print(f"  harm=1: {harm_counts.get(1, 0):,}  harm=0: {harm_counts.get(0, 0):,}  "
+              f"hard_negatives: {hard_neg:,}")
         print("  Per label:")
         
         for label in ALL_LABELS:
@@ -116,7 +131,9 @@ def print_stats(dataset: DatasetDict):
                 print(f"    {label:35s}: {count:6,}{novel}")
 
     if "train" in dataset:
-        novel = sum(1 for s in dataset["train"] if s["novel"])
+        novel_labels = {l for l in ALL_LABELS if SUBTYPE_DEFINITIONS.get(l, {}).get("novel")}
+        feature = dataset["train"].features["label"]
+        novel = sum(1 for x in dataset["train"]["label"] if feature.int2str(x) in novel_labels)
         print(f"\n  Novel category samples (train): {novel:,} "
               f"({novel/len(dataset['train'])*100:.1f}%)")
     print("=" * 60)

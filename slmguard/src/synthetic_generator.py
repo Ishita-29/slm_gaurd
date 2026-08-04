@@ -159,7 +159,7 @@ def call_claude(system: str, user: str, max_retries: int = 3) -> Optional[str]:
     for attempt in range(max_retries):
         try:
             response = claude_client.messages.create(
-                model="claude-sonnet-4-20250514",
+                model="claude-sonnet-5",
                 max_tokens=4000,
                 system=system,
                 messages=[{"role": "user", "content": user}],
@@ -283,7 +283,7 @@ def generate_se_batch(
             "label_id": LABEL2ID.get(subtype, 1),
             "is_se": 1,
             "source": "synthetic_claude",
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-5",
             "novel": definition.get("novel", False),
             "goal": goal,
         }
@@ -316,7 +316,7 @@ def generate_hard_negatives(category: str, meta: dict, n: int = 40) -> List[Dict
             "label_id": LABEL2ID["benign"],
             "is_se": 0,
             "source": "synthetic_hard_negative",
-            "model": "claude-sonnet-4-20250514",
+            "model": "claude-sonnet-5",
             "novel": False,
             "hard_negative_category": category,
         }

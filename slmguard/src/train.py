@@ -5,6 +5,15 @@ import logging
 import torch
 from pathlib import Path
 
+# datasets' torch formatter unconditionally imports torchvision.io.VideoReader,
+# which newer torchvision releases removed — crashes DataLoader workers on any
+# text-only dataset even though video support is never used here.
+import torchvision.io
+if not hasattr(torchvision.io, "VideoReader"):
+    class _DummyVideoReader:
+        pass
+    torchvision.io.VideoReader = _DummyVideoReader
+
 from datasets import load_from_disk
 from transformers import (
     DebertaV2Tokenizer, DebertaV2Model,
@@ -12,6 +21,8 @@ from transformers import (
     Trainer, TrainingArguments,
     EarlyStoppingCallback,
     BitsAndBytesConfig,
+    DataCollatorWithPadding,
+    set_seed,
 )
 from torch import nn
 from transformers import get_cosine_schedule_with_warmup
@@ -44,7 +55,9 @@ LORA_TARGETS = {
     "qwen25":       ["q_proj", "v_proj"],
 }
 
-BENIGN_WEIGHT = 11.0   # upweights minority benign class (1/12 of dataset)
+HARM0_WEIGHT = 1.06    # mild upweighting for harm_label=0, the slightly smaller class
+                        # (measured 9,821:10,402 in the current train split — not the old
+                        # 11:1 is_se imbalance this constant used to compensate for)
 
 # Decoder model families — use last-token pooling instead of CLS
 DECODER_FAMILIES = {"phi4mini", "qwen25"}
@@ -55,8 +68,8 @@ class SLMGuardModel(nn.Module):
     Multi-task SE-detection model on top of a shared encoder or decoder backbone.
 
     Two jointly trained heads share the same encoder representation:
-      - binary_head     : sigmoid output → P(input is social engineering)
-      - multiclass_head : softmax over 12 classes (benign + 11 SE subtypes)
+      - binary_head     : sigmoid output → P(input is harmful), trained on harm_label
+      - multiclass_head : softmax over 12 classes (no_se + 11 SE subtypes), auxiliary
 
     Joint loss = α·focal_binary_loss + (1-α)·cross_entropy_multiclass
     where α=0.7 by default (binary task weighted more for deployment use).
@@ -76,6 +89,7 @@ class SLMGuardModel(nn.Module):
         self.model_name  = model_name
         self.model_key   = model_key
         self.is_decoder  = model_key in DECODER_FAMILIES
+        self.use_lora    = use_lora
 
         # ── Load backbone ────────────────────────────────────────────────────
         if self.is_decoder:
@@ -149,8 +163,15 @@ class SLMGuardModel(nn.Module):
             p.requires_grad = False
 
     def unfreeze_encoder(self):
-        for p in self.encoder.parameters():
-            p.requires_grad = True
+        if self.use_lora:
+            # Only re-enable LoRA adapters -- the base encoder weights must
+            # stay frozen for the parameter-efficiency claim to hold.
+            for name, p in self.encoder.named_parameters():
+                if "lora_" in name:
+                    p.requires_grad = True
+        else:
+            for p in self.encoder.parameters():
+                p.requires_grad = True
 
     def _pool(self, outputs, attention_mask):
         """Pool hidden states: CLS for encoders, last non-pad token for decoders."""
@@ -189,38 +210,42 @@ class SLMGuardModel(nn.Module):
         }
 
 
-def preprocess_function(examples, tokenizer, max_length=256):
+def preprocess_function(examples, tokenizer, max_length=512):
+    # No padding here — padding is deferred to a DataCollatorWithPadding so each
+    # batch only pays for the length of its own longest example, not a fixed
+    # max_length on every example (important now that max_length is large
+    # enough to actually use ModernBERT's long-context capability).
     return tokenizer(
         examples["text"],
         truncation=True,
         max_length=max_length,
-        padding="max_length",
     )
 
 
 class SLMGuardTrainer(Trainer):
     """
-    Multi-task trainer: jointly optimises binary SE detection + 12-class tactic classification.
+    Multi-task trainer: jointly optimises binary harm detection + 12-class SE-subtype
+    classification (the latter is auxiliary — it never gates the block/allow decision).
 
     Loss = alpha * L_binary + (1 - alpha) * L_multiclass
 
-    L_binary     : focal BCE with class weighting (benign upweighted to handle 11:1 imbalance)
-    L_multiclass : standard cross-entropy over 12 SE subtypes + benign
+    L_binary     : focal BCE with class weighting, target = harm_label (not is_se)
+    L_multiclass : standard cross-entropy over 12 SE subtypes + no_se
     alpha        : 0.7 — binary task weighted more because deployment goal is block/pass
     gamma        : 2   — focal loss exponent; downweights easy examples
-    benign_weight: 11.0 — compensates for 1:11 benign:attack ratio in dataset
+    harm0_weight : mild upweighting for harm_label=0 (see HARM0_WEIGHT)
     """
 
-    def __init__(self, *args, benign_weight: float = BENIGN_WEIGHT,
+    def __init__(self, *args, harm0_weight: float = HARM0_WEIGHT,
                  alpha: float = 0.7, **kwargs):
         super().__init__(*args, **kwargs)
-        self.benign_weight = benign_weight
+        self.harm0_weight = harm0_weight
         self.alpha = alpha           # weight of binary task in joint loss
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        inputs  = dict(inputs)
-        labels  = inputs.pop("labels")               # multiclass label 0–11  [B]
-        is_se   = inputs.pop("is_se")                # binary 0/1             [B]
+        inputs     = dict(inputs)
+        labels     = inputs.pop("labels")               # multiclass label 0–11  [B]
+        harm_label = inputs.pop("harm_label")            # binary 0/1             [B]
         forward_inputs = {k: inputs[k] for k in ("input_ids", "attention_mask") if k in inputs}
 
         outputs           = model(**forward_inputs)
@@ -233,14 +258,14 @@ class SLMGuardTrainer(Trainer):
 
         # ── Binary focal loss with class weighting ───────────────────────────
         bce_raw = nn.functional.binary_cross_entropy_with_logits(
-            binary_logits, is_se.float(), reduction="none"
+            binary_logits, harm_label.float(), reduction="none"
         )
         p_t          = torch.exp(-bce_raw)
         focal_weight = (1 - p_t) ** 2                   # gamma=2: focus on hard examples
         sample_weights = torch.where(
-            is_se == 0,
-            torch.full_like(is_se, self.benign_weight, dtype=torch.float),
-            torch.ones_like(is_se, dtype=torch.float),
+            harm_label == 0,
+            torch.full_like(harm_label, self.harm0_weight, dtype=torch.float),
+            torch.ones_like(harm_label, dtype=torch.float),
         )
         binary_loss = (focal_weight * bce_raw * sample_weights).mean()
 
@@ -286,13 +311,15 @@ def train(
     epochs:        int   = 8,
     batch_size:    int   = 16,
     lr:            float = 2e-5,
-    max_length:    int   = 256,
+    max_length:    int   = 512,
     freeze_epochs: int   = 1,
     warmup_ratio:  float = 0.06,
     weight_decay:  float = 0.01,
     patience:      int   = 3,
     use_lora:      bool  = False,
     use_int8:      bool  = False,
+    seed:          int   = 42,
+    alpha:         float = 0.7,
 ):
     """
     Two-phase training:
@@ -301,13 +328,19 @@ def train(
 
     With LoRA: Phase 1 still freezes the encoder; Phase 2 unfreezes LoRA adapters only.
     With INT8: encoder stays 8-bit throughout; heads are FP32.
+
+    seed and alpha are exposed here (not hardcoded) so a matched ablation run
+    (e.g. binary-only vs multi-task) can vary only the thing under test while
+    holding everything else — including the seed — identical across runs.
     """
+    set_seed(seed)
     model_name = MODEL_ALIASES.get(model_key, model_key)
     log.info(f"Device      : {DEVICE}")
     log.info(f"Backbone    : {model_name}")
     log.info(f"LoRA        : {use_lora}  |  INT8 : {use_int8}")
     log.info(f"Epochs      : {epochs}  (frozen warm-up: {freeze_epochs})")
     log.info(f"Batch size  : {batch_size}  |  LR : {lr}")
+    log.info(f"Seed        : {seed}  |  alpha : {alpha}")
 
     # ── Dataset ───────────────────────────────────────────────────────────────
     log.info(f"Loading dataset from {data_dir}")
@@ -329,15 +362,21 @@ def train(
         batched=True,
         num_proc=4,
         load_from_cache_file=False,
-        remove_columns=["text", "source", "novel"],
+        remove_columns=["text", "source"],
     )
     tokenized = tokenized.map(
-        lambda x: {"labels": x["label_id"], "is_se": x["is_se"]},
+        lambda x: {"labels": x["label_id"], "harm_label": x["harm_label"]},
         batched=True,
         num_proc=4,
         load_from_cache_file=False,
     )
-    tokenized.set_format("torch", columns=["input_ids", "attention_mask", "labels", "is_se"])
+    tokenized.set_format("torch", columns=["input_ids", "attention_mask", "labels", "harm_label"])
+
+    # Dynamic per-batch padding (see preprocess_function) instead of fixed
+    # padding="max_length" — pads the "labels"/"harm_label" scalar columns too since
+    # they pass straight through, which is a no-op for them but keeps the
+    # collator generic.
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
     # ── Model ─────────────────────────────────────────────────────────────────
     log.info("Initialising model...")
@@ -374,13 +413,16 @@ def train(
             max_grad_norm=0.5,
             remove_unused_columns=False,
             dataloader_num_workers=4,
-            seed=42,
+            seed=seed,
         )
         trainer_frozen = SLMGuardTrainer(
             model=model,
             args=args_frozen,
             train_dataset=tokenized["train"],
             eval_dataset=tokenized["validation"],
+            data_collator=data_collator,
+            harm0_weight=HARM0_WEIGHT,
+            alpha=alpha,
         )
         trainer_frozen.train()
         log.info("Phase 1 complete — unfreezing encoder")
@@ -409,7 +451,7 @@ def train(
         greater_is_better=False,
         load_best_model_at_end=True,
         save_total_limit=2,
-        seed=42,
+        seed=seed,
         fp16=False,
         bf16=use_bf16 and "deberta" not in model_name.lower() and not use_int8,  # bf16 causes NaN in DeBERTa with multi-task loss
         dataloader_num_workers=4,
@@ -423,7 +465,9 @@ def train(
         args=training_args,
         train_dataset=tokenized["train"],
         eval_dataset=tokenized["validation"],
-        benign_weight=BENIGN_WEIGHT,
+        data_collator=data_collator,
+        harm0_weight=HARM0_WEIGHT,
+        alpha=alpha,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=patience)],
     )
 
@@ -449,7 +493,7 @@ def train(
         "model_key":     model_key,
         "use_lora":      use_lora,
         "use_int8":      use_int8,
-        "benign_weight": BENIGN_WEIGHT,
+        "harm0_weight": HARM0_WEIGHT,
         "is_decoder":    model_key in DECODER_FAMILIES,
     }
     with open(f"{output_dir}/slmguard_config.json", "w") as f:
@@ -471,10 +515,14 @@ if __name__ == "__main__":
     parser.add_argument("--freeze-epochs", type=int,   default=1)
     parser.add_argument("--batch",         type=int,   default=16)
     parser.add_argument("--lr",            type=float, default=2e-5)
-    parser.add_argument("--max-length",    type=int,   default=256)
+    parser.add_argument("--max-length",    type=int,   default=512)
     parser.add_argument("--patience",      type=int,   default=3)
     parser.add_argument("--lora",          action="store_true", help="Enable LoRA fine-tuning")
     parser.add_argument("--int8",          action="store_true", help="Enable INT8 quantisation (Phi-4-mini only)")
+    parser.add_argument("--seed",          type=int,   default=42,
+                        help="Random seed — vary this and nothing else for seed-averaging runs")
+    parser.add_argument("--alpha",         type=float, default=0.7,
+                        help="Weight of binary loss in joint loss (1-alpha goes to multiclass)")
     args = parser.parse_args()
 
     train(
@@ -489,4 +537,6 @@ if __name__ == "__main__":
         patience=args.patience,
         use_lora=args.lora,
         use_int8=args.int8,
+        seed=args.seed,
+        alpha=args.alpha,
     )

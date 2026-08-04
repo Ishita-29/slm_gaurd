@@ -1,4 +1,4 @@
-import torch, sys
+import json, torch, sys
 from safetensors.torch import load_file
 sys.path.insert(0, '/data/ishita_workspace/SLM-GAURD/slmguard/src')
 from config import ALL_LABELS, ID2LABEL
@@ -11,9 +11,15 @@ CKPT = '/data/ishita_workspace/SLM-GAURD/slmguard/checkpoints/slmguard-modernber
 DATA = '/data/ishita_workspace/SLM-GAURD/slmguard/data/final/slmguard_dataset'
 
 print("Loading model...")
-model = SLMGuardModel('answerdotai/ModernBERT-large', model_key='modernbert', use_lora=True).cuda()
+cfg = json.load(open(f'{CKPT}/slmguard_config.json'))
+MAX_LENGTH = cfg.get('max_length', 256)  # read from checkpoint, not hardcoded — must match training
+model = SLMGuardModel(cfg['model_name'], model_key=cfg['model_key'], use_lora=cfg['use_lora']).cuda()
 state = torch.load(f'{CKPT}/pytorch_model.bin', map_location='cuda')
-model.load_state_dict(state, strict=False)
+load_result = model.load_state_dict(state, strict=False)
+if load_result.missing_keys:
+    print(f"WARNING: missing_keys when loading checkpoint: {load_result.missing_keys}")
+if load_result.unexpected_keys:
+    print(f"WARNING: unexpected_keys when loading checkpoint: {load_result.unexpected_keys}")
 model.eval()
 
 print("Loading tokenizer and data...")
@@ -23,7 +29,7 @@ ds = load_from_disk(DATA)['test'].select(range(240))
 
 preds_mc, true_mc, preds_bin, true_bin = [], [], [], []
 for ex in ds:
-    enc = tokenizer(ex['text'], return_tensors='pt', max_length=256, truncation=True)
+    enc = tokenizer(ex['text'], return_tensors='pt', max_length=MAX_LENGTH, truncation=True)
     enc = {k: v.cuda() for k, v in enc.items()}
     with torch.no_grad():
         out = model(**enc)

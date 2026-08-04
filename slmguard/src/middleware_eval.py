@@ -61,15 +61,20 @@ def load_guard(device):
         use_lora=cfg['use_lora']
     )
     state = torch.load(f'{GUARD_CKPT}/pytorch_model.bin', map_location='cpu')
-    guard.load_state_dict(state, strict=False)
+    load_result = guard.load_state_dict(state, strict=False)
+    if load_result.missing_keys:
+        print(f"WARNING: missing_keys when loading checkpoint: {load_result.missing_keys}")
+    if load_result.unexpected_keys:
+        print(f"WARNING: unexpected_keys when loading checkpoint: {load_result.unexpected_keys}")
     guard.eval().to(device)
     tok = AutoTokenizer.from_pretrained(cfg['model_name'], trust_remote_code=True)
-    return guard, tok
+    max_length = cfg.get('max_length', 256)  # read from checkpoint, not hardcoded — must match training
+    return guard, tok, max_length
 
 
-def guard_score(guard, tok, text, device, threshold=0.4):
+def guard_score(guard, tok, text, device, max_length, threshold=0.4):
     """Return (blocked: bool, prob: float)"""
-    enc = tok(text, return_tensors='pt', max_length=256,
+    enc = tok(text, return_tensors='pt', max_length=max_length,
                truncation=True, padding=True)
     enc = {k: v.to(device) for k, v in enc.items()}
     with torch.no_grad():
@@ -162,7 +167,7 @@ def evaluate(target_key, n_per_subtype, n_benign, guard_threshold, guard_device,
 
     # Load models
     print("\nLoading SLM-Guard...")
-    guard, guard_tok = load_guard(guard_device)
+    guard, guard_tok, guard_max_length = load_guard(guard_device)
 
     print("Loading target LLM...")
     llm, llm_tok = load_target(target_name, llm_device)
@@ -184,7 +189,7 @@ def evaluate(target_key, n_per_subtype, n_benign, guard_threshold, guard_device,
         label   = ID2LABEL.get(ex['label_id'], 'unknown')
 
         # ── SLM-Guard decision ─────────────────────────────────────────
-        blocked, prob = guard_score(guard, guard_tok, text, guard_device, guard_threshold)
+        blocked, prob = guard_score(guard, guard_tok, text, guard_device, guard_max_length, guard_threshold)
 
         # ── WITHOUT guard: always send to LLM ─────────────────────────
         resp_noguard = generate_response(llm, llm_tok, text, llm_device)

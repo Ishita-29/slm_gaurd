@@ -9,7 +9,7 @@ Ablations:
   A2 — Multiclass-only loss (no binary focal loss, alpha=0.0)
   A3 — Multi-task (default) (alpha=0.7)  ← proposed design
   A4 — No focal loss        (standard BCE instead of focal)
-  A5 — No class weighting   (benign_weight=1.0 instead of 11.0)
+  A5 — No class weighting   (harm0_weight=1.0 instead of ~1.06)
   A6 — No frozen warm-up    (freeze_epochs=0)
 
 Each ablation trains from scratch and evaluates on the same test set.
@@ -37,9 +37,11 @@ from transformers import DebertaV2Tokenizer
 import sys
 sys.path.insert(0, ".")
 from config import ALL_LABELS
-from train import SLMGuardModel, SLMGuardTrainer, preprocess_function, BENIGN_WEIGHT
-from transformers import TrainingArguments, EarlyStoppingCallback
+from train import SLMGuardModel, SLMGuardTrainer, preprocess_function, HARM0_WEIGHT
+from transformers import TrainingArguments, EarlyStoppingCallback, DataCollatorWithPadding, set_seed
 from torch import nn
+
+MAX_LENGTH = 512  # matches train.py; keep in sync so ablations and the main run are comparable
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger(__name__)
@@ -55,7 +57,7 @@ class AblationConfig:
     description:  str
     alpha:        float = 0.7      # binary loss weight (1.0 = binary-only, 0.0 = mc-only)
     use_focal:    bool  = True     # use focal loss vs standard BCE
-    benign_weight:float = 11.0     # class weight for benign samples
+    harm0_weight: float = HARM0_WEIGHT  # class weight for harm_label=0 samples
     freeze_epochs:int   = 1        # frozen warm-up epochs
     epochs:       int   = 5
     batch_size:   int   = 16
@@ -90,10 +92,10 @@ ABLATIONS = {
     ),
     "A5": AblationConfig(
         name="A5 — No class weighting",
-        description="Multi-task loss but benign_weight=1.0 (no upweighting). "
-                    "Tests contribution of class reweighting for 11:1 imbalance.",
+        description="Multi-task loss but harm0_weight=1.0 (no upweighting). "
+                    "Tests contribution of class reweighting for the harm_label imbalance.",
         alpha=0.7,
-        benign_weight=1.0,
+        harm0_weight=1.0,
     ),
     "A6": AblationConfig(
         name="A6 — No frozen warm-up",
@@ -109,15 +111,15 @@ class AblationTrainer(SLMGuardTrainer):
     """Extends SLMGuardTrainer with ablation-specific loss configurations."""
 
     def __init__(self, *args, alpha: float = 0.7, use_focal: bool = True,
-                 benign_weight: float = BENIGN_WEIGHT, **kwargs):
-        super().__init__(*args, benign_weight=benign_weight, **kwargs)
+                 harm0_weight: float = HARM0_WEIGHT, **kwargs):
+        super().__init__(*args, harm0_weight=harm0_weight, **kwargs)
         self.alpha      = alpha
         self.use_focal  = use_focal
 
     def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
-        inputs  = dict(inputs)
-        labels  = inputs.pop("labels")
-        is_se   = inputs.pop("is_se")
+        inputs     = dict(inputs)
+        labels     = inputs.pop("labels")
+        harm_label = inputs.pop("harm_label")
         forward_inputs = {k: inputs[k] for k in ("input_ids", "attention_mask") if k in inputs}
 
         outputs           = model(**forward_inputs)
@@ -126,7 +128,7 @@ class AblationTrainer(SLMGuardTrainer):
 
         # Binary loss
         bce_raw = nn.functional.binary_cross_entropy_with_logits(
-            binary_logits, is_se.float(), reduction="none"
+            binary_logits, harm_label.float(), reduction="none"
         )
         if self.use_focal:
             p_t          = torch.exp(-bce_raw)
@@ -135,9 +137,9 @@ class AblationTrainer(SLMGuardTrainer):
             focal_weight = torch.ones_like(bce_raw)
 
         sample_weights = torch.where(
-            is_se == 0,
-            torch.full_like(is_se, self.benign_weight, dtype=torch.float),
-            torch.ones_like(is_se, dtype=torch.float),
+            harm_label == 0,
+            torch.full_like(harm_label, self.harm0_weight, dtype=torch.float),
+            torch.ones_like(harm_label, dtype=torch.float),
         )
         binary_loss = (focal_weight * bce_raw * sample_weights).mean()
 
@@ -166,7 +168,7 @@ def evaluate_model(model, tokenizer, test_ds, threshold=0.4, alpha=0.7):
     """Run inference and compute metrics on test set."""
     model.eval()
     texts       = list(test_ds["text"])
-    true_binary = np.array(test_ds["is_se"])
+    true_binary = np.array(test_ds["harm_label"])
     true_labels = np.array(test_ds["label_id"])
 
     all_binary_probs = []
@@ -176,7 +178,7 @@ def evaluate_model(model, tokenizer, test_ds, threshold=0.4, alpha=0.7):
     for i in range(0, len(texts), BATCH):
         batch = texts[i:i+BATCH]
         enc = tokenizer(
-            batch, truncation=True, max_length=256,
+            batch, truncation=True, max_length=MAX_LENGTH,
             padding=True, return_tensors="pt"
         ).to(DEVICE)
         out = model(**enc)
@@ -188,7 +190,11 @@ def evaluate_model(model, tokenizer, test_ds, threshold=0.4, alpha=0.7):
     binary_probs     = np.array(all_binary_probs)
     multiclass_probs = np.array(all_multiclass_probs)
 
-    # For alpha=0 (multiclass-only), derive binary from P(not benign)
+    # For alpha=0 (multiclass-only), derive binary from P(not benign) as a proxy
+    # for harm — expected to score poorly against true harm_label, since SE
+    # subtype presence is not a reliable proxy for harm (measured directly:
+    # 51.2% of SE-framed prompts in this corpus are not harmful). That gap is
+    # itself the result A2 is designed to surface, not a bug in this derivation.
     if alpha <= 0.0:
         pred_binary = (1 - multiclass_probs[:, 0] >= threshold).astype(int)
     else:
@@ -218,30 +224,33 @@ def evaluate_model(model, tokenizer, test_ds, threshold=0.4, alpha=0.7):
 
 
 def run_ablation(ablation_id: str, cfg: AblationConfig, dataset,
-                 tokenizer, quick: bool = False):
+                 tokenizer, quick: bool = False, seed: int = 42):
     log.info(f"\n{'='*60}")
     log.info(f"Running {cfg.name}")
     log.info(f"  {cfg.description}")
     log.info(f"  alpha={cfg.alpha}  focal={cfg.use_focal}  "
-             f"benign_w={cfg.benign_weight}  freeze={cfg.freeze_epochs}")
+             f"harm0_w={cfg.harm0_weight}  freeze={cfg.freeze_epochs}  seed={seed}")
+    set_seed(seed)
 
-    output_dir = f"{OUT_BASE}/{ablation_id.lower()}"
+    output_dir = f"{OUT_BASE}/seed{seed}/{ablation_id.lower()}"
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     epochs     = 2 if quick else cfg.epochs
     use_bf16   = torch.cuda.is_available() and torch.cuda.is_bf16_supported()
 
-    # Tokenize
+    # Tokenize (no padding here — DataCollatorWithPadding pads per-batch below,
+    # matching train.py so ablations and the main run are directly comparable)
     tokenized = dataset.map(
-        lambda x: preprocess_function(x, tokenizer, 256),
+        lambda x: preprocess_function(x, tokenizer, MAX_LENGTH),
         batched=True, num_proc=4, load_from_cache_file=False,
-        remove_columns=["text", "source", "novel"],
+        remove_columns=["text", "source"],
     )
     tokenized = tokenized.map(
-        lambda x: {"labels": x["label_id"], "is_se": x["is_se"]},
+        lambda x: {"labels": x["label_id"], "harm_label": x["harm_label"]},
         batched=True, num_proc=4, load_from_cache_file=False,
     )
-    tokenized.set_format("torch", columns=["input_ids", "attention_mask", "labels", "is_se"])
+    tokenized.set_format("torch", columns=["input_ids", "attention_mask", "labels", "harm_label"])
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
 
     model = SLMGuardModel(
         model_name="answerdotai/ModernBERT-large",
@@ -267,14 +276,15 @@ def run_ablation(ablation_id: str, cfg: AblationConfig, dataset,
             max_grad_norm=1.0,
             remove_unused_columns=False,
             dataloader_num_workers=4,
-            seed=42,
+            seed=seed,
         )
         t_frozen = AblationTrainer(
             model=model, args=args_frozen,
             train_dataset=tokenized["train"],
             eval_dataset=tokenized["validation"],
+            data_collator=data_collator,
             alpha=cfg.alpha, use_focal=cfg.use_focal,
-            benign_weight=cfg.benign_weight,
+            harm0_weight=cfg.harm0_weight,
         )
         t_frozen.train()
         model.unfreeze_encoder()
@@ -297,7 +307,7 @@ def run_ablation(ablation_id: str, cfg: AblationConfig, dataset,
         greater_is_better=False,
         load_best_model_at_end=True,
         save_total_limit=1,
-        seed=42,
+        seed=seed,
         bf16=use_bf16, fp16=False,
         dataloader_num_workers=4,
         remove_unused_columns=False,
@@ -308,8 +318,9 @@ def run_ablation(ablation_id: str, cfg: AblationConfig, dataset,
         model=model, args=args,
         train_dataset=tokenized["train"],
         eval_dataset=tokenized["validation"],
+        data_collator=data_collator,
         alpha=cfg.alpha, use_focal=cfg.use_focal,
-        benign_weight=cfg.benign_weight,
+        harm0_weight=cfg.harm0_weight,
         callbacks=[EarlyStoppingCallback(early_stopping_patience=2)],
     )
     trainer.train()
@@ -327,7 +338,7 @@ def run_ablation(ablation_id: str, cfg: AblationConfig, dataset,
     return metrics
 
 
-def main(ablations_to_run: List[str], quick: bool = False):
+def main(ablations_to_run: List[str], quick: bool = False, seed: int = 42):
     log.info(f"Loading dataset from {DATA_DIR}")
     dataset   = load_from_disk(DATA_DIR)
     from transformers import AutoTokenizer
@@ -341,7 +352,7 @@ def main(ablations_to_run: List[str], quick: bool = False):
             continue
         cfg = ABLATIONS[ablation_id]
         try:
-            metrics = run_ablation(ablation_id, cfg, dataset, tokenizer, quick=quick)
+            metrics = run_ablation(ablation_id, cfg, dataset, tokenizer, quick=quick, seed=seed)
             all_results[ablation_id] = {"config": cfg.__dict__, "metrics": metrics}
         except Exception as e:
             log.error(f"Ablation {ablation_id} failed: {e}")
@@ -375,7 +386,7 @@ def main(ablations_to_run: List[str], quick: bool = False):
 
     # Save
     Path(OUT_BASE).mkdir(parents=True, exist_ok=True)
-    out_path = f"{OUT_BASE}/ablation_results.json"
+    out_path = f"{OUT_BASE}/seed{seed}/ablation_results.json"
     with open(out_path, "w") as f:
         json.dump(all_results, f, indent=2, default=str)
     log.info(f"Results saved → {out_path}")
@@ -388,6 +399,8 @@ if __name__ == "__main__":
                         help="Which ablations to run (default: all)")
     parser.add_argument("--quick", action="store_true",
                         help="2-epoch run for debugging (not for final results)")
+    parser.add_argument("--seed", type=int, default=42,
+                        help="Random seed — hold identical across A1/A3 etc. for a matched ablation")
     args = parser.parse_args()
 
-    main(ablations_to_run=args.ablations, quick=args.quick)
+    main(ablations_to_run=args.ablations, quick=args.quick, seed=args.seed)

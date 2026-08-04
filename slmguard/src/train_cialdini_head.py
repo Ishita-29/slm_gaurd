@@ -19,6 +19,9 @@ from config import ID2LABEL
 GUARD_CKPT = '/data/ishita_workspace/SLM-GAURD/slmguard/checkpoints/slmguard-modernbert-lora'
 DATA_PATH  = '/data/ishita_workspace/SLM-GAURD/slmguard/data/final/slmguard_dataset'
 SAVE_PATH  = '/data/ishita_workspace/SLM-GAURD/slmguard/checkpoints/slmguard-cialdini-head'
+# Best-epoch checkpoint during training -- was previously /tmp/best_cialdini_head.pt,
+# which a shared server can wipe mid-run; keep it under the persistent SAVE_PATH instead.
+BEST_CKPT_PATH = f'{SAVE_PATH}/best_cialdini_head.pt'
 DEVICE     = 'cuda' if torch.cuda.is_available() else 'cpu'
 
 # ── Cialdini group mapping ────────────────────────────────────────────────────
@@ -56,7 +59,18 @@ class CialdiniDataset(Dataset):
         self.items = []
         for ex in hf_split:
             subtype = ID2LABEL.get(ex['label_id'], 'benign')
-            cialdini_id = SUBTYPE_TO_CIALDINI.get(subtype, 0)
+            if subtype not in SUBTYPE_TO_CIALDINI:
+                # A silent .get(subtype, 0) fallback would corrupt this example
+                # to "benign" with no error -- the worst failure mode for a
+                # safety classifier. Fail loudly instead: an unmapped subtype
+                # means SUBTYPE_TO_CIALDINI is out of sync with config.py's
+                # LABEL2ID and must be fixed before training on this data.
+                raise KeyError(
+                    f"Subtype '{subtype}' (label_id={ex['label_id']}) has no "
+                    f"Cialdini mapping. Add it to SUBTYPE_TO_CIALDINI or fix "
+                    f"config.py's LABEL2ID before continuing."
+                )
+            cialdini_id = SUBTYPE_TO_CIALDINI[subtype]
             self.items.append({'text': ex['text'], 'cialdini_id': cialdini_id})
         self.tokenizer  = tokenizer
         self.max_length = max_length
@@ -117,7 +131,11 @@ def main():
         use_lora=cfg['use_lora']
     )
     state = torch.load(f'{GUARD_CKPT}/pytorch_model.bin', map_location='cpu')
-    guard.load_state_dict(state, strict=False)
+    load_result = guard.load_state_dict(state, strict=False)
+    if load_result.missing_keys:
+        print(f"WARNING: missing_keys when loading checkpoint: {load_result.missing_keys}")
+    if load_result.unexpected_keys:
+        print(f"WARNING: unexpected_keys when loading checkpoint: {load_result.unexpected_keys}")
     guard.eval()
     # Freeze everything
     for p in guard.parameters():
@@ -138,6 +156,12 @@ def main():
         print(f"  {name:15s} (class {cid}): {counts[cid]:,}")
 
     # Class weights (inverse frequency)
+    zero_count_classes = [CIALDINI_LABELS[i] for i in range(N_CIALDINI) if counts[i] == 0]
+    assert not zero_count_classes, (
+        f"Cialdini class(es) with zero training examples: {zero_count_classes} "
+        f"-- inverse-frequency weighting would divide by zero. Check "
+        f"SUBTYPE_TO_CIALDINI coverage and the train split before continuing."
+    )
     total = sum(counts.values())
     weights = torch.tensor(
         [total / (N_CIALDINI * counts[i]) for i in range(N_CIALDINI)],
@@ -176,6 +200,7 @@ def main():
         return pooled
 
     # ── Training loop ──────────────────────────────────────────────────────────
+    Path(SAVE_PATH).mkdir(parents=True, exist_ok=True)  # ensure it exists before BEST_CKPT_PATH is written
     best_val_f1, best_epoch = 0.0, 0
     print(f"\nTraining for {EPOCHS} epochs (head only)...\n")
 
@@ -222,13 +247,13 @@ def main():
         if val_f1 > best_val_f1:
             best_val_f1  = val_f1
             best_epoch   = epoch
-            torch.save(head.state_dict(), '/tmp/best_cialdini_head.pt')
+            torch.save(head.state_dict(), BEST_CKPT_PATH)
 
     print(f"\n  Best val macro-F1: {best_val_f1:.1f}% at epoch {best_epoch}")
 
     # ── Test evaluation ────────────────────────────────────────────────────────
     print("\nLoading best checkpoint for test evaluation...")
-    head.load_state_dict(torch.load('/tmp/best_cialdini_head.pt'))
+    head.load_state_dict(torch.load(BEST_CKPT_PATH))
     head.eval()
 
     test_preds, test_labels = [], []

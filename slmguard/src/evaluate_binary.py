@@ -26,11 +26,13 @@ def load_model(ckpt_dir):
         model_name = cfg['model_name']
         model_key  = cfg.get('model_key', 'deberta')
         use_lora   = cfg.get('use_lora', False)
+        max_length = cfg.get('max_length', 256)
     else:
         # Legacy checkpoint (no slmguard_config.json)
         model_name = 'microsoft/deberta-v3-large'
         model_key  = 'deberta'
         use_lora   = False
+        max_length = 256
 
     print(f"Backbone : {model_name}")
     print(f"LoRA     : {use_lora}")
@@ -62,10 +64,14 @@ def load_model(ckpt_dir):
         else:
             raise FileNotFoundError(f"No model weights found in {ckpt_dir}")
 
-    model.load_state_dict(state, strict=False)
+    load_result = model.load_state_dict(state, strict=False)
+    if load_result.missing_keys:
+        print(f"WARNING: missing_keys when loading checkpoint: {load_result.missing_keys}")
+    if load_result.unexpected_keys:
+        print(f"WARNING: unexpected_keys when loading checkpoint: {load_result.unexpected_keys}")
     model.eval()
     model.to(DEVICE)
-    return model, model_name, model_key
+    return model, model_name, model_key, max_length
 
 
 def get_tokenizer(model_name, model_key):
@@ -80,7 +86,7 @@ def get_tokenizer(model_name, model_key):
 
 def evaluate(ckpt_dir, split='test', max_samples=None, threshold=0.5):
     print(f"\nLoading checkpoint: {ckpt_dir}")
-    model, model_name, model_key = load_model(ckpt_dir)
+    model, model_name, model_key, max_length = load_model(ckpt_dir)
     tokenizer = get_tokenizer(model_name, model_key)
 
     print(f"Loading {split} split...")
@@ -93,7 +99,7 @@ def evaluate(ckpt_dir, split='test', max_samples=None, threshold=0.5):
     for ex in ds:
         enc = tokenizer(
             ex['text'], return_tensors='pt',
-            max_length=256, truncation=True, padding=True
+            max_length=max_length, truncation=True, padding=True
         )
         enc = {k: v.to(DEVICE) for k, v in enc.items()}
         with torch.no_grad():
@@ -138,4 +144,4 @@ if __name__ == '__main__':
     parser.add_argument('--threshold',  type=float, default=0.5)
     args = parser.parse_args()
 
-    evaluate(args.checkpoint, args.split, args.max_samples if hasattr(args, 'max_samples') else args.samples, args.threshold)
+    evaluate(args.checkpoint, args.split, args.samples, args.threshold)
