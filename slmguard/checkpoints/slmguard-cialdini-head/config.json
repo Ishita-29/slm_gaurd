@@ -23,8 +23,8 @@
     "cognitive_load_embedding": 6,
     "identity_erosion": 6
   },
-  "macro_f1": 0.8863,
-  "accuracy": 0.871,
+  "macro_f1": 0.894,
+  "accuracy": 0.8817,
   "hidden_size": 1024,
-  "encoder_ckpt": "/data/ishita_workspace/SLM-GAURD/slmguard/checkpoints/slmguard-modernbert-lora"
+  "encoder_ckpt": "/data/ishita_workspace/SLM-GAURD/slmguard/checkpoints/slmguard-deploy-alpha085"
 }
