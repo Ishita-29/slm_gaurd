@@ -20,8 +20,7 @@ slmguard/logs/
 
 # IDE
 .vscode/
-.idea/
-.claude/
+
 
 # Jupyter
 .ipynb_checkpoints/
@@ -47,18 +46,6 @@ slmguard/data/
 # HuggingFace datasets internal cache files (in case any data/ exception is ever added)
 **/cache-*.arrow
 
-# Session working notes — internal, not part of the shared repo
-PROJECT_STATUS.md
-human_review_sample.md
-
-# Thesis document — not part of the shared code repo
-Ishita_Agarwal_Thesis_Revised_LaTeX/
-
-# Separate project — not part of slm_gaurd
-audio_se_project/
-
-# Zip files
-*.zip
 
 # Installers
 Miniconda*.sh
