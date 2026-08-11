@@ -6,10 +6,6 @@ import torch
 from pathlib import Path
 import torchvision.io
 
-if not hasattr(torchvision.io, "VideoReader"):
-    class _DummyVideoReader:
-        pass
-    torchvision.io.VideoReader = _DummyVideoReader
 
 from datasets import load_from_disk
 from transformers import (
